@@ -1,0 +1,37 @@
+[log]
+logLevel = "DEBUG"
+
+
+[entryPoints]
+  [entryPoints.http]
+  address = ":8888"
+
+[api]
+
+[providers]
+   [providers.file]
+
+[Routers]
+  [Routers.router1]
+    Service = "service1"
+    Middlewares = ["redirect-https"]
+    Rule = "Host: example.com"
+
+  [Routers.router2]
+    Service = "service1"
+    Middlewares = ["redirect-https", "api-slash-strip"]
+    Rule = "Host: example2.com"
+
+[Middlewares]
+  [Middlewares.api-strip.StripPrefix]
+     prefixes = ["/api"]
+  [Middlewares.api-slash-strip.StripPrefix]
+     prefixes = ["/api/"]
+
+[Services]
+  [Services.service1]
+    [Services.service1.LoadBalancer]
+
+      [[Services.service1.LoadBalancer.Servers]]
+        URL = "http://127.0.0.1:80"
+        Weight = 1
