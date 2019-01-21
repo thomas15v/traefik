@@ -680,6 +680,7 @@ func TestEncodeConfiguration(t *testing.T) {
 						"fiibar",
 					},
 					AccessControlMaxAge: 600,
+					AddVaryHeader:       true,
 					AllowedHosts: []string{
 						"foobar",
 						"fiibar",
