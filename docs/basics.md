@@ -322,6 +322,29 @@ In this example, traffic routed through the first frontend will have the `X-Fram
 !!! note
     The detailed documentation for those security headers can be found in [unrolled/secure](https://github.com/unrolled/secure#available-options).
 
+##### CORS headers
+
+Cors headers can also be automatically created and added by Traefik. The `AccessControlAllowOrigin` configuration allows for the `Access-Control-Allow-Origin` response header to be dynamically generated based on the request `Origin` header. The `Vary` header can also be automaticall updated/appended as required (if configured).
+
+Here is an example of this configuration that enables CORS headers:
+
+```toml
+[frontends]
+  [frontends.frontend1]
+  backend = "backend1"
+    [frontends.frontend1.headers]
+    AccessControlAllowOrigin = "origin-list-or-null"
+    AddVaryHeader = true
+    [frontends.frontend1.routes.test_1]
+    rule = "PathPrefixStrip:/cheddar"
+  [frontends.frontend2]
+  backend = "backend2"
+    [frontends.frontend2.headers]
+    AccessControlAllowOrigin = "*"
+    [frontends.frontend2.routes.test_1]
+    rule = "PathPrefixStrip:/stilton"
+```
+
 ### Backends
 
 A backend is responsible to load-balance the traffic coming from one or more frontends to a set of http servers.
