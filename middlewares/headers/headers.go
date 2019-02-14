@@ -128,34 +128,37 @@ func (s *Header) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	s.originHeader = req.Header.Get("Origin")
 
 	if reqAcMethod != "" && reqAcHeaders != "" && s.originHeader != "" && req.Method == http.MethodOptions {
-		// Preflight request, build response
+		// If the request is an OPTIONS request with an Access-Control-Request-Method header, and  Access-Control-Request-Headers headers,
+		// and Origin headers, then it is a CORS preflight request, and we need to build a custom response: https://www.w3.org/TR/cors/#preflight-request
 		if s.headers.AccessControlAllowCredentials {
-			rw.Header().Add("Access-Control-Allow-Credentials", "true")
+			rw.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
 
 		allowHeaders := strings.Join(s.headers.AccessControlAllowHeaders, ",")
 		if allowHeaders != "" {
-			rw.Header().Add("Access-Control-Allow-Headers", allowHeaders)
+			rw.Header().Set("Access-Control-Allow-Headers", allowHeaders)
 		}
 
 		allowMethods := strings.Join(s.headers.AccessControlAllowMethods, ",")
 		if allowMethods != "" {
-			rw.Header().Add("Access-Control-Allow-Methods", allowMethods)
+			rw.Header().Set("Access-Control-Allow-Methods", allowMethods)
 		}
 
 		allowOrigin := s.getAllowOrigin()
 
 		if allowOrigin != "" {
-			rw.Header().Add("Access-Control-Allow-Origin", allowOrigin)
+			rw.Header().Set("Access-Control-Allow-Origin", allowOrigin)
 		}
 
-		rw.Header().Add("Access-Control-Max-Age", strconv.Itoa(int(s.headers.AccessControlMaxAge)))
-	} else {
-		s.modifyRequestHeaders(req)
-		// If there is a next, call it.
-		if s.next != nil {
-			s.next.ServeHTTP(rw, req)
-		}
+		rw.Header().Set("Access-Control-Max-Age", strconv.Itoa(int(s.headers.AccessControlMaxAge)))
+
+		return
+	}
+
+	s.modifyRequestHeaders(req)
+	// If there is a next, call it.
+	if s.next != nil {
+		s.next.ServeHTTP(rw, req)
 	}
 }
 
@@ -190,10 +193,10 @@ func (s *Header) ModifyResponseHeaders(res *http.Response) error {
 		if s.headers.AddVaryHeader {
 			varyHeader := res.Header.Get("Vary")
 			if varyHeader != "" {
-				varyHeader += ",Origin"
-			} else {
-				varyHeader = "Origin"
+				varyHeader += ","
 			}
+			varyHeader += "Origin"
+
 			res.Header.Set("Vary", varyHeader)
 		}
 	}
@@ -219,6 +222,7 @@ func (s *Header) getAllowOrigin() string {
 		return s.originHeader
 	case "*":
 		return "*"
+	default:
+		return ""
 	}
-	return ""
 }

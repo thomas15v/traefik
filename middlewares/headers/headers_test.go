@@ -4,13 +4,13 @@ package headers
 
 import (
 	"context"
-	"github.com/containous/traefik/tracing"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/containous/traefik/config"
 	"github.com/containous/traefik/testhelpers"
+	"github.com/containous/traefik/tracing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
