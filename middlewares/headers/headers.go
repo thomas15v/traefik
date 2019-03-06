@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/containous/traefik/config"
 	"github.com/containous/traefik/middlewares"
@@ -28,22 +30,26 @@ func New(ctx context.Context, next http.Handler, config config.Headers, name str
 	logger := middlewares.GetLogger(ctx, name, typeName)
 	logger.Debug("Creating middleware")
 
-	if !config.HasSecureHeadersDefined() && !config.HasCustomHeadersDefined() {
+	hasSecureHeaders := config.HasSecureHeadersDefined()
+	hasCustomHeaders := config.HasCustomHeadersDefined()
+	hasCorsHeaders := config.HasCorsHeadersDefined()
+
+	if !hasSecureHeaders && !hasCustomHeaders && !hasCorsHeaders {
 		return nil, errors.New("headers configuration not valid")
 	}
 
 	var handler http.Handler
 	nextHandler := next
 
-	if config.HasSecureHeadersDefined() {
+	if hasSecureHeaders {
 		logger.Debug("Setting up secureHeaders from %v", config)
 		handler = newSecure(next, config)
 		nextHandler = handler
 	}
 
-	if config.HasCustomHeadersDefined() {
-		logger.Debug("Setting up customHeaders from %v", config)
-		handler = newHeader(nextHandler, config)
+	if hasCustomHeaders || hasCorsHeaders {
+		logger.Debug("Setting up customHeaders/Cors from %v", config)
+		handler = NewHeader(nextHandler, config)
 	}
 
 	return &headers{
@@ -102,33 +108,121 @@ func (s secureHeader) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 // Header is a middleware that helps setup a few basic security features. A single headerOptions struct can be
 // provided to configure which features should be enabled, and the ability to override a few of the default values.
-type header struct {
-	next http.Handler
-	// If Custom request headers are set, these will be added to the request
-	customRequestHeaders map[string]string
+type Header struct {
+	next         http.Handler
+	headers      *config.Headers
+	originHeader string
 }
 
 // NewHeader constructs a new header instance from supplied frontend header struct.
-func newHeader(next http.Handler, headers config.Headers) *header {
-	return &header{
-		next:                 next,
-		customRequestHeaders: headers.CustomRequestHeaders,
+func NewHeader(next http.Handler, headers config.Headers) *Header {
+	return &Header{
+		next:    next,
+		headers: &headers,
 	}
 }
 
-func (s *header) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+func (s *Header) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	reqAcMethod := req.Header.Get("Access-Control-Request-Method")
+	reqAcHeaders := req.Header.Get("Access-Control-Request-Headers")
+	s.originHeader = req.Header.Get("Origin")
+
+	if reqAcMethod != "" && reqAcHeaders != "" && s.originHeader != "" && req.Method == http.MethodOptions {
+		// If the request is an OPTIONS request with an Access-Control-Request-Method header, and  Access-Control-Request-Headers headers,
+		// and Origin headers, then it is a CORS preflight request, and we need to build a custom response: https://www.w3.org/TR/cors/#preflight-request
+		if s.headers.AccessControlAllowCredentials {
+			rw.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+
+		allowHeaders := strings.Join(s.headers.AccessControlAllowHeaders, ",")
+		if allowHeaders != "" {
+			rw.Header().Set("Access-Control-Allow-Headers", allowHeaders)
+		}
+
+		allowMethods := strings.Join(s.headers.AccessControlAllowMethods, ",")
+		if allowMethods != "" {
+			rw.Header().Set("Access-Control-Allow-Methods", allowMethods)
+		}
+
+		allowOrigin := s.getAllowOrigin()
+
+		if allowOrigin != "" {
+			rw.Header().Set("Access-Control-Allow-Origin", allowOrigin)
+		}
+
+		rw.Header().Set("Access-Control-Max-Age", strconv.Itoa(int(s.headers.AccessControlMaxAge)))
+
+		return
+	}
+
 	s.modifyRequestHeaders(req)
-	s.next.ServeHTTP(rw, req)
+	// If there is a next, call it.
+	if s.next != nil {
+		s.next.ServeHTTP(rw, req)
+	}
 }
 
 // modifyRequestHeaders set or delete request headers.
-func (s *header) modifyRequestHeaders(req *http.Request) {
+func (s *Header) modifyRequestHeaders(req *http.Request) {
 	// Loop through Custom request headers
-	for header, value := range s.customRequestHeaders {
+	for header, value := range s.headers.CustomRequestHeaders {
 		if value == "" {
 			req.Header.Del(header)
 		} else {
 			req.Header.Set(header, value)
 		}
+	}
+}
+
+// ModifyResponseHeaders set or delete response headers
+func (s *Header) ModifyResponseHeaders(res *http.Response) error {
+	// Loop through Custom response headers
+	for header, value := range s.headers.CustomResponseHeaders {
+		if value == "" {
+			res.Header.Del(header)
+		} else {
+			res.Header.Set(header, value)
+		}
+	}
+
+	allowOrigin := s.getAllowOrigin()
+
+	if allowOrigin != "" {
+		res.Header.Set("Access-Control-Allow-Origin", allowOrigin)
+
+		if s.headers.AddVaryHeader {
+			varyHeader := res.Header.Get("Vary")
+			if varyHeader != "" {
+				varyHeader += ","
+			}
+			varyHeader += "Origin"
+
+			res.Header.Set("Vary", varyHeader)
+		}
+	}
+
+	if s.headers.AccessControlAllowCredentials {
+		res.Header.Set("Access-Control-Allow-Credentials", "true")
+	}
+
+	exposeHeaders := strings.Join(s.headers.AccessControlExposeHeaders, ",")
+	if exposeHeaders != "" {
+		res.Header.Set("Access-Control-Expose-Headers", exposeHeaders)
+	}
+
+	return nil
+}
+
+func (s *Header) getAllowOrigin() string {
+	switch s.headers.AccessControlAllowOrigin {
+	case "origin-list-or-null":
+		if s.originHeader == "" {
+			return "null"
+		}
+		return s.originHeader
+	case "*":
+		return "*"
+	default:
+		return ""
 	}
 }
